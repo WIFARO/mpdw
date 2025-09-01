@@ -1,0 +1,419 @@
+---
+title: "Tugas MPDW Praktikum WIldy"
+author: "Wildy Fahmi Rosyidi G1401231066"
+date: "2025-08-31"
+output: html_document
+---
+
+```{r}
+library("readxl")
+library("forecast")
+library("graphics")
+library("TTR")
+library("TSA")
+library(rio)
+```
+
+
+```{r}
+data_mpdw <- import("https://raw.githubusercontent.com/nyayunabila/mpdw/refs/heads/main/Pertemuan%201/data-kelompok-9-mpdw.csv")
+```
+
+```{r}
+data_301to400 <- data_mpdw[301:400, ]
+data_301to400
+```
+
+## Eksplorasi Data
+
+```{r}
+str(data_301to400)
+dim(data_301to400)
+```
+
+### Mengubah ke deret waktu
+
+```{r}
+data_dw <- ts(data_301to400$daily_revenue)
+```
+
+```{r}
+summary(data_dw)
+```
+
+### Plot deret waktu
+
+```{r}
+ts.plot(data_dw, xlab="Date ", ylab="Daily Revenue", 
+        main = "Time Series Plot")
+points(data_dw)
+```
+
+Dari plot diatas, saya berasumsi data bersifat konstan. Jadi saya akan menggunakan Single Mvoing Average untuk pemulusan
+
+## Pembagian Data
+
+Pembagian data latih dan data uji dilakukan dengan perbandingan 80% data latih dan 20% data uji.
+
+```{r}
+data_latih <- data_301to400[1:80,]
+data_uji <- data_301to400[81:100,]
+data_latih_dw <- ts(data_latih$daily_revenue)
+data_uji_dw <- ts(data_uji$daily_revenue)
+```
+
+### Plot
+
+```{r}
+plot(data_dw, col="red",main="Plot semua data")
+points(data_dw)
+
+plot(data_latih_dw, col="blue",main="Plot data latih")
+points(data_latih_dw)
+
+plot(data_uji_dw, col="blue",main="Plot data uji")
+points(data_uji_dw)
+```
+
+## Single Moving Average (SMA)
+
+Pada pemulusan menggunakan SMA ini, parameter yang saya gunakan adalah `m = 4`
+
+```{r}
+data_sma <- SMA(data_latih_dw, n=4)
+data_sma
+```
+
+Hasil data ramal
+
+```{r}
+data_ramal <- c(NA,data_sma)
+data_ramal
+```
+
+Dari hasil pemulusan diatas, bisa diambil nilai peramalan untuk 20 data uji kedepan yaitu 223.72667. Karena dalam SMA, data ramalan `t` periode ke depan akan bernilai sama dengan nilai 1 periode ke depan.
+
+### Peramalan 20 periode kedepan
+
+```{r}
+data_gab <- cbind(aktual=c(data_latih_dw,rep(NA,20)),pemulusan=c(data_sma,rep(NA,20)),ramalan=c(data_ramal,rep(data_ramal[length(data_ramal)],19)))
+data_gab
+```
+
+
+### Plot hasil peramalan data uji
+
+```{r}
+ts.plot(data_dw, xlab="Date ", ylab="Daily Revenue", main= "Single Moving Average dengan N=3 ")
+points(data_dw)
+lines(data_gab[,2],col="green",lwd=2)
+lines(data_gab[,3],col="red",lwd=2)
+legend("topleft",c("data aktual","data pemulusan","data peramalan"), lty=8, col=c("black","green","red"), cex=0.5)
+```
+
+### Perhitungan Akurasi
+
+```{r}
+error_train_sma = data_latih_dw-data_ramal[1:length(data_latih_dw)]
+SSE_train_sma = sum(error_train_sma[5:length(data_latih_dw)]^2)
+MSE_train_sma = mean(error_train_sma[5:length(data_latih_dw)]^2)
+MAPE_train_sma = mean(abs((error_train_sma[5:length(data_latih_dw)]/data_latih_dw[1:length(data_latih_dw)])*100))
+
+akurasi_train_sma <- matrix(c(SSE_train_sma, MSE_train_sma, MAPE_train_sma))
+row.names(akurasi_train_sma)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi_train_sma) <- c("Akurasi m = 4")
+akurasi_train_sma
+```
+
+Hasil MAPE yang didapat berupa infinite, yang mana ini kemungkinan diakrenakan ada nilai 0 pada `data_latih_dw`. Sehingga menyebabkan ada nilai yang bernilai infinite. Dan ketika di rata-rata akan menghasilkan nilai infinite pula. Karena itu saya akan mengganti nilai 0 pada `data_latih_dw` menjadi rata rata dari data yang lain.
+
+```{r}
+data_tanpa_nol <- data_latih
+data_tanpa_nol <- data_tanpa_nol[data_tanpa_nol$daily_revenue != 0, ]
+mean(data_tanpa_nol$daily_revenue)
+```
+
+Nilai 233.0366 akan saya masukkan sebagai pengganti untuk angka 0 pada `data_latih_dw`
+
+```{r}
+data_latih_baru = data_latih
+data_latih_baru$daily_revenue[data_latih_baru$daily_revenue == 0] <- 233.0366
+data_latih_baru
+```
+
+Ubah data ke time series
+
+```{r}
+data_latih_baru_dw <- ts(data_latih_baru$daily_revenue)
+```
+
+Selanjutnya akan dilakukan pengujian akurasi ulang
+
+```{r}
+error_train_sma = data_latih_dw-data_ramal[1:length(data_latih_dw)]
+SSE_train_sma = sum(error_train_sma[5:length(data_latih_dw)]^2)
+MSE_train_sma = mean(error_train_sma[5:length(data_latih_dw)]^2)
+MAPE_train_sma = mean(abs((error_train_sma[5:length(data_latih_baru_dw)]/data_latih_baru_dw[5:length(data_latih_baru_dw)])*100))
+
+akurasi_train_sma <- matrix(c(SSE_train_sma, MSE_train_sma, MAPE_train_sma))
+row.names(akurasi_train_sma)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi_train_sma) <- c("Akurasi m = 4")
+akurasi_train_sma
+```
+
+Nilai MAPE yang dihasilkan sangat besar. Berarti model memiliki nilai akurasi yang sangat buruk, dan memerlukan model pemulusan yang lain.
+
+#### Menggunakan metriks lain
+
+Karena hasil dari MAPE dirasa tidak memuaskan, saya akan mencoba menggunakan metriks lain yaitu MAE.
+
+```{r}
+mae <- mean(abs(data_latih_dw[5:length(data_latih_dw)] - data_ramal[5:length(data_latih_dw)]))
+mae
+```
+
+Didapat nilai MAE sebesar 113.2509
+
+Selanjutnya saya akan membandingkan nilai MAE dari data latih dengan data uji
+
+```{r}
+mae_uji <- mean(abs(data_uji_dw - data_gab[81:100,3]))
+mae_uji
+```
+
+Nilai MAE yang didapat untuk data uji < dari data latih. Berarti model memiliki performa yang lebih baik untuk data uji dibanding dengan data latih, dengan selisih nilai MAE sebesar 29.50615.
+
+## Double Moving Average (DMA)
+
+```{r}
+dma <- SMA(data_sma, n = 4)
+At <- 2*data_sma - dma
+Bt <- 2/(4-1)*(data_sma - dma)
+data_dma<- At+Bt
+data_ramal_dma<- c(NA, data_dma)
+
+t = 1:20
+f = c()
+
+for (i in t) {
+  f[i] = At[length(At)] + Bt[length(Bt)]*(i)
+}
+
+data_gab2 <- cbind(aktual = c(data_latih_dw,rep(NA,20)), pemulusan1 = c(data_sma,rep(NA,20)),pemulusan2 = c(data_dma, rep(NA,20)),At = c(At, rep(NA,20)), Bt = c(Bt,rep(NA,20)),ramalan = c(data_ramal_dma, f[-1]))
+data_gab2
+```
+
+```{r}
+ts.plot(data_dw, xlab="Date ", ylab="Daily Revenue", main= "Double Moving Average with N=4")
+points(data_dw)
+lines(data_gab2[,3],col="green",lwd=2)
+lines(data_gab2[,6],col="red",lwd=2)
+legend("topleft",c("data aktual","data pemulusan","data peramalan"), lty=8, col=c("black","green","red"), cex=0.8)
+```
+
+### Pengujian Akurasi
+
+Pengujian dilakukan menggunakan MAE
+
+```{r}
+mae_dma_latih <- mean(abs(data_latih_dw[8:length(data_latih_dw)] - data_ramal_dma[8:length(data_latih_dw)]))
+mae_dma_latih
+```
+
+```{r}
+mae_dma_uji <- mean(abs(data_uji_dw - data_gab2[81:100,6]))
+mae_dma_uji
+```
+
+Dari hasil pengujian menggunakan MAE didapat hasil data uji < data latih untuk model dari DMA.
+
+## Single Exponential Smoothing (SES)
+
+Untuk pemulusan SES disini, saya menggunakan fungsi `HoltWinters()`
+
+```{r}
+ses1<- HoltWinters(data_latih_dw, gamma = FALSE, beta = FALSE, alpha = 0.2)
+plot(ses1)
+
+ramalan1<- forecast(ses1, h=20)
+ramalan1
+
+ses2<- HoltWinters(data_latih_dw, gamma = FALSE, beta = FALSE, alpha = 0.7)
+plot(ses2)
+
+ramalan2<- forecast(ses2, h=20)
+ramalan2
+```
+
+```{r}
+sesopt<- HoltWinters(data_latih_dw, gamma = FALSE, beta = FALSE,alpha = NULL)
+sesopt
+plot(sesopt)
+
+ramalanopt<- forecast(sesopt, h=20)
+ramalanopt
+```
+
+### Perhitungan Akurasi
+
+```{r}
+SSE1<-ses1$SSE
+MSE1<-ses1$SSE/length(data_latih_dw)
+RMSE1<-sqrt(MSE1)
+
+akurasi1 <- matrix(c(SSE1,MSE1,RMSE1))
+row.names(akurasi1)<- c("SSE", "MSE", "RMSE")
+colnames(akurasi1) <- c("Akurasi lamda=0.2")
+akurasi1
+
+SSE2<-ses2$SSE
+MSE2<-ses2$SSE/length(data_latih_dw)
+RMSE2<-sqrt(MSE2)
+
+akurasi2 <- matrix(c(SSE2,MSE2,RMSE2))
+row.names(akurasi2)<- c("SSE", "MSE", "RMSE")
+colnames(akurasi2) <- c("Akurasi lamda=0.7")
+akurasi2
+```
+
+Bila melihat dari hasil pengujian diatas. Akurasi untuk lamda = 0.2 memiliki akurasi yang lebih baik dilihat dari nilai SSE, MSE, dan RMSE nya yang lebih kecil dibanding lamda = 0.7
+
+Selanjutnya akan dilakukan pengujian untuk data uji
+
+```{r}
+selisih1<-ramalan1$mean-data_uji$daily_revenue
+SSEtesting1<-sum(selisih1^2)
+MSEtesting1<-SSEtesting1/length(data_uji)
+
+selisih2<-ramalan2$mean-data_uji$daily_revenue
+SSEtesting2<-sum(selisih2^2)
+MSEtesting2<-SSEtesting2/length(data_uji)
+
+selisihopt<-ramalanopt$mean-data_uji$daily_revenue
+SSEtestingopt<-sum(selisihopt^2)
+MSEtestingopt<-SSEtestingopt/length(data_uji)
+
+akurasitesting1 <- matrix(c(SSEtesting1,SSEtesting2,SSEtestingopt))
+row.names(akurasitesting1)<- c("SSE1", "SSE2", "SSEopt")
+akurasitesting1
+
+akurasitesting2 <- matrix(c(MSEtesting1,MSEtesting2,MSEtestingopt))
+row.names(akurasitesting2)<- c("MSE1", "MSE2", "MSEopt")
+akurasitesting2
+```
+
+```{r}
+accuracy(ramalanopt,data_uji$daily_revenue)
+```
+
+## Double Exponential Smoothing (DES)
+
+```{r}
+des_1<- HoltWinters(data_latih_dw, gamma = FALSE, beta = 0.2, alpha = 0.2)
+plot(des_1)
+
+ramalandes1<- forecast(des_1, h=20)
+ramalandes1
+
+des_2<- HoltWinters(data_latih_dw, gamma = FALSE, beta = 0.3, alpha = 0.6)
+plot(des_2)
+
+ramalandes2<- forecast(des_2, h=20)
+ramalandes2
+```
+
+```{r}
+plot(data_dw)
+lines(des_1$fitted[,1], lty=2, col="blue")
+lines(ramalandes1$mean, col="red")
+```
+
+```{r}
+des_opt<- HoltWinters(data_latih_dw, gamma = FALSE)
+des_opt
+plot(des_opt)
+
+ramalandesopt<- forecast(des_opt, h=20)
+ramalandesopt
+```
+
+### Perhitungan Akurasi
+
+```{r}
+ssedes_train1<-des_1$SSE
+msedes_train1<-ssedes_train1/length(data_latih_dw)
+sisaandes1<-ramalandes1$residuals
+head(sisaandes1)
+
+mapedes_train1 <- sum(abs(sisaandes1[3:length(data_latih_dw)]/data_latih_dw[3:length(data_latih_dw)])
+                      *100)/length(data_latih_dw)
+
+akurasides_1 <- matrix(c(ssedes_train1,msedes_train1,mapedes_train1))
+row.names(akurasides_1)<- c("SSE", "MSE", "MAPE")
+colnames(akurasides_1) <- c("Akurasi lamda=0.2 dan gamma=0.2")
+akurasides_1
+
+ssedes_train2<-des_2$SSE
+msedes_train2<-ssedes_train2/length(data_latih_dw)
+sisaandes2<-ramalandes2$residuals
+head(sisaandes2)
+
+mapedes_train2 <- sum(abs(sisaandes2[3:length(data_latih_dw)]/data_latih_dw[3:length(data_latih_dw)])
+                      *100)/length(data_latih_dw)
+
+akurasides_2 <- matrix(c(ssedes_train2,msedes_train2,mapedes_train2))
+row.names(akurasides_2)<- c("SSE", "MSE", "MAPE")
+colnames(akurasides_2) <- c("Akurasi lamda=0.6 dan gamma=0.3")
+akurasides_2
+```
+
+```{r}
+selisihdes1<-ramalandes1$mean-data_uji$daily_revenue
+selisihdes1
+
+SSEtestingdes1<-sum(selisihdes1^2)
+MSEtestingdes1<-SSEtestingdes1/length(data_uji$daily_revenue)
+MAPEtestingdes1<-sum(abs(selisihdes1/data_uji$daily_revenue)*100)/length(data_uji$daily_revenue)
+
+selisihdes2<-ramalandes2$mean-data_uji$daily_revenue
+selisihdes2
+
+SSEtestingdes2<-sum(selisihdes2^2)
+MSEtestingdes2<-SSEtestingdes2/length(data_uji$daily_revenue)
+MAPEtestingdes2<-sum(abs(selisihdes2/data_uji$daily_revenue)*100)/length(data_uji$daily_revenue)
+
+selisihdesopt<-ramalandesopt$mean-data_uji$daily_revenue
+selisihdesopt
+
+SSEtestingdesopt<-sum(selisihdesopt^2)
+MSEtestingdesopt<-SSEtestingdesopt/length(data_uji$daily_revenue)
+MAPEtestingdesopt<-sum(abs(selisihdesopt/data_uji$daily_revenue)*100)/length(data_uji$daily_revenue)
+
+akurasitestingdes <-
+  matrix(c(SSEtestingdes1,MSEtestingdes1,MAPEtestingdes1,SSEtestingdes2,MSEtestingdes2,
+           MAPEtestingdes2,SSEtestingdesopt,MSEtestingdesopt,MAPEtestingdesopt),
+         nrow=3,ncol=3)
+row.names(akurasitestingdes)<- c("SSE", "MSE", "MAPE")
+colnames(akurasitestingdes) <- c("des ske1","des ske2","des opt")
+akurasitestingdes
+```
+
+## Perbandingan SES dan DES
+
+```{r}
+MSEfull <-
+  matrix(c(MSEtesting1,MSEtesting2,MSEtestingopt,MSEtestingdes1,MSEtestingdes2,
+           MSEtestingdesopt),nrow=3,ncol=2)
+row.names(MSEfull)<- c("ske 1", "ske 2", "ske opt")
+colnames(MSEfull) <- c("ses","des")
+MSEfull
+```
+
+Dari nilai MSE untuk DES yang lebih kecil dibanding SES, disimpulkan metode DES lebih baik dibandingkan metode SES. 
+
+## Kesimpulan
+
+Sebenernya untuk semua pemulusan mau itu MSA, MDA, DES. Dapat diketahui bahwa model beekrja dengan lebih baik pada data uji dibandingkan data latih.
+
+
+
