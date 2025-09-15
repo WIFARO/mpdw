@@ -1,0 +1,317 @@
+---
+title: "Tugas MPDW Praktikum 3 Wildy"
+author: "Wildy Fahmi Rosyidi G1401231066"
+date: "2025-09-14"
+output: html_document
+---
+
+```{r}
+library(dLagM)
+library(dynlm)
+library(MLmetrics)
+library(lmtest)
+library(car)
+library(psych)
+library(dplyr)
+library(lmtest)
+library(HoRM)
+```
+
+## Data
+
+```{r}
+data_mpdw3 <- read.csv("C:/Users/W/Downloads/NewDelhi_Air_quality.csv", header = TRUE, sep = ",", stringsAsFactors = FALSE)
+data_mpdw3
+```
+
+Saya akan menghilangkan kolom `X` dan kolom berkaitan dengan waktu , seperti : `datetime`, `timestamp_local`, dll. Dan saya 
+
+```{r}
+data_tanpa_waktu <- data_mpdw3[ , -c(1, 4, 10, 11, 12)]
+data_tanpa_waktu
+```
+
+## Eksplorasi Data & Pemilihan Peubah
+
+Karena peubah Y sudah diketahui (AQI), disini saya ingin memilih peubah X melalui korelasinya. Saya akan buat matriks korelasi dan melihat peubah mana yang paling signifikan dengan peubah Y (AQI)
+
+```{r}
+pairs.panels(data_tanpa_waktu,
+             method = "pearson",
+             hist.col = "skyblue",
+             density = TRUE,
+             ellipses = TRUE,
+             stars = TRUE,
+             lm = TRUE)
+```
+
+Dari hasil diatas didapat peubah `o3` berpengaruh sangat signifikan terhadap nilai AQI, maka saya akan menggunakan `o3` sebagai peubah X saya.
+
+```{r}
+data_mpdw3_final <- data_mpdw3[ , c(2, 6)]
+data_mpdw3_final
+```
+
+```{r}
+str(data_mpdw3_final)
+dim(data_mpdw3_final)
+```
+
+## Pengecekan Autokorelasi
+
+```{r}
+model_awal <- lm(AQI ~ o3, data = data_mpdw3_final)
+summary(model_awal)
+```
+
+Uji Durbin-Watson dengan :
+
+H0 : Tidak ada autokorelasi. Sisaan saling bebas.
+
+H1 : Ada autokorelasi.
+
+```{r}
+dwtest(model_awal)
+```
+
+Meskipun pada hasil summary model awal sebelumnya diketahui kalo model kita terlihat sangat baik dengan R-squared yang mencapai 0.9472 dan nilai `o3` yang signifikan. Tapi pada hasil Durbin-Watson test diketahui bahwa kita menolak H0, yang berarti model kita mengalami autokorelasi.
+
+### Penanganan Autokorelasi
+
+Untuk penanganan nya sendiri saya akan menggunakan metode Hidreth-Lu
+
+```{r}
+hildreth.lu.func <- function(r, model){
+  x <- model.matrix(model)[,-1]
+  y <- model.response(model.frame(model))
+  n <- length(y)
+  t <- 2:n
+  y <- y[t]-r*y[t-1]
+  x <- x[t]-r*x[t-1]
+  
+  return(lm(y~x))
+}
+
+r <- c(seq(0.1,0.9, by= 0.1))
+tab <- data.frame("rho" = r, "SSE" = sapply(r, function(i){deviance(hildreth.lu.func(i, model_awal))}))
+round(tab, 4)
+```
+
+Didapat nilai SSE nya terendah antara 0.3 hingga 0.6
+
+```{r}
+rOpt <- seq(0.3,0.6, by= 0.001)
+tabOpt <- data.frame("rho" = rOpt, "SSE" = sapply(rOpt, function(i){deviance(hildreth.lu.func(i, model_awal))}))
+head(tabOpt[order(tabOpt$SSE),])
+```
+
+Didapat rho dengan nilai SSE terkecil adalah 0.450.
+
+```{r}
+model_hl_mpdw3 <- hildreth.lu(data_mpdw3_final$o3, data_mpdw3_final$AQI, rho = 0.450)
+summary(model_hl_mpdw3)
+```
+
+```{r}
+dwtest(model_hl_mpdw3)
+```
+
+Setelah dilakukan penanganan dengan metode Hildreth-Lu model sudah aman dari autokorelasi.
+
+## Pemodelan Time Series
+
+### Pembuatan Data
+
+Saya akan menambahkan kolom `t`, `AQI - 1` ke dalam data `data_mpdw3_final`
+
+```{r}
+data_mpdw_lag <- data_mpdw3_final %>%
+  mutate(
+    t = row_number(),
+    AQI_1 = lag(AQI, 1)
+  ) %>%
+  select(t, AQI, AQI_1, o3)
+data_mpdw_lag
+```
+
+
+### Pembagian data
+
+Akan dibagi 80% data latih dan 20% data uji
+
+```{r}
+train_mpdw3 <- data_mpdw_lag[1:58,]
+test_mpdw3 <- data_mpdw_lag[59:72,]
+```
+
+```{r}
+train_mpdw3_ts <- ts(train_mpdw3)
+test_mpdw3_ts <- ts(test_mpdw3)
+data_mpdw3_ts <- ts(data_mpdw_lag)
+```
+
+## Model Koyck
+
+```{r}
+model_koyck <- koyckDlm(x = train_mpdw3$o3, y = train_mpdw3$AQI)
+summary(model_koyck)
+AIC(model_koyck)
+BIC(model_koyck)
+```
+
+Dari summary diketahui bahwa Xt (nilai 03 pada periode yang sama) dan Yt-1 (nilai AQI 1 periode sebelumnya) berpengaruh signifikan terhadap nilai Yt (nilai AQI).
+
+### Peramalan 
+
+Akan dilakukan peramalan sebanyak 14 periode kedepan
+
+```{r}
+fore_koyck <- forecast(model = model_koyck, x=test_mpdw3$o3, h=14)
+mape_koyck <- MAPE(fore_koyck$forecasts, test_mpdw3$AQI)
+mape_koyck
+
+GoF(model_koyck)
+```
+
+Bila melihat dari hasil MAPE, nilainya tidak berbeda begitu jauh. Dan masih sama sama bagus (MAPE <10%).
+
+## Model Distributed Lag 
+
+### Mencari Lag Optimum
+
+```{r}
+finiteDLMauto(formula = AQI ~ o3,
+              data = data.frame(train_mpdw3), q.min = 1, q.max = 30,
+              model.type = "dlm", error.type = "AIC", trace = TRUE)
+```
+
+Dari hasil pencarian lag optimum diatas, didapat lag optimum nya 27. Selanjutnya akan dibuat model dengan lag nya 27
+
+```{r}
+model_dlm <- dlm(x = train_mpdw3$o3,y = train_mpdw3$AQI , q = 27)
+summary(model_dlm)
+AIC(model_dlm)
+BIC(model_dlm)
+```
+
+Dari hasil tersebut terdapat beberapa peubah yang berpengaruh signifikan terhadap taraf nyata 5% yaitu Xt, Xt-8, Xt-9, Xt-11, Xt-21, Xt-23, Xt-24, dan Xt-27.
+
+### Peramalan
+
+Akan dilakukan peramalan untuk 14 periode kedepan
+
+```{r}
+fore_dlm <- forecast(model = model_dlm, x=test_mpdw3$o3, h=14)
+
+mape_dlm<- MAPE(fore_dlm$forecasts, test_mpdw3$AQI)
+mape_dlm
+
+GoF(model_dlm)
+```
+
+Bila melihat dari hasil MAPE. Model DLM bagus hanya untuk data latih, sedangkan pada data uji nilainya buruk. Sehingga model mengalami overfitted.
+
+## Model Autoregressive
+
+### Mencari Lag Optimum
+
+```{r}
+model_ardl <- ardlBoundOrders(data = data.frame(data_mpdw_lag), ic = "AIC", 
+                                  formula = AQI ~ o3 )
+model_ardl
+min_p=c()
+for(i in 1:6){
+  min_p[i]=min(model_ardl$Stat.table[[i]])
+}
+q_opt=which(min_p==min(min_p, na.rm = TRUE))
+p_opt=which(model_ardl$Stat.table[[q_opt]] == 
+              min(model_ardl$Stat.table[[q_opt]], na.rm = TRUE))
+data.frame("q_optimum" = q_opt, "p_optimum" = p_opt, 
+           "AIC"=model_ardl$min.Stat)
+```
+
+Didapat q optimum nya 2 dan p optimum nya 13.
+
+```{r}
+model_ardl2 <- ardlDlm(formula = AQI ~ o3, 
+                         data = train_mpdw3,p = 13, q = 2)
+summary(model_ardl2)
+```
+
+### Peramalan
+
+```{r}
+fore_ardl <- forecast(model = model_ardl2, x=test_mpdw3$o3, h=14)
+fore_ardl
+
+mape_ardl <- MAPE(fore_ardl$forecasts, test_mpdw3$AQI)
+mape_ardl
+
+GoF(model_ardl2)
+```
+
+Bila melihat dari hasil MAPE, nilainya tidak berbeda jauh. Dan keduanya sama sama bagus (<10%).
+
+## Evaluasi Model
+
+### Autokorelasi
+
+```{r}
+dwtest(residuals(model_koyck) ~ 1)
+dwtest(residuals(model_dlm) ~ 1)
+dwtest(residuals(model_ardl2) ~ 1)
+```
+
+Semua model aman dari autokorelasi
+
+### Heterogenitas
+
+```{r}
+bptest(residuals(model_koyck) ~ fitted(model_koyck))
+bptest(residuals(model_dlm) ~ fitted(model_dlm))
+bptest(residuals(model_ardl2) ~ fitted(model_ardl2))
+```
+
+### Kenormalan
+
+```{r}
+shapiro.test(residuals(model_koyck))
+shapiro.test(residuals(model_dlm))
+shapiro.test(residuals(model_ardl2))
+```
+
+## Perbandingan Model
+
+```{r}
+akurasi <- matrix(c(mape_koyck, mape_dlm, mape_ardl))
+row.names(akurasi)<- c("Koyck","DLM","Autoregressive")
+colnames(akurasi) <- c("MAPE")
+akurasi
+```
+
+Bila melihat dari hasil MAPE nya, model paling optimum adalah Model ARDL karena memiliki nilai MAPE yang terkecil. Sedangkan model DLM merupakan model yang buruk
+
+### Plot
+
+```{r}
+par(mfrow=c(1,1))
+plot(test_mpdw3$o3, test_mpdw3$AQI, type="b", col="black", ylim=c(0,50))
+points(test_mpdw3$o3, fore_koyck$forecasts,col="red")
+lines(test_mpdw3$o3, fore_koyck$forecasts,col="red")
+points(test_mpdw3$o3, fore_dlm$forecasts,col="blue")
+lines(test_mpdw3$o3, fore_dlm$forecasts,col="blue")
+points(test_mpdw3$o3, fore_ardl$forecasts,col="green")
+lines(test_mpdw3$o3, fore_ardl$forecasts,col="green")
+legend("topleft",c("aktual", "Koyck","DLM", "Autoregressive"), lty=1, col=c("black","red","blue","green"), cex=0.8)
+```
+
+Melihat dari plot diatas, model ARDL adlaah model yang paling mendekati aktualnya, diikuti dengan model Koyck. Dan dapat dilihat model DLM sangat melenceng
+
+
+
+
+
+
+
+
+
